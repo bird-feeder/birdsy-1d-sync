@@ -1,0 +1,7 @@
+requests>=2.26.0
+wget>=3.2
+python-dotenv>=0.19.1
+loguru>=0.5.3
+selenium>=4.1.0
+tqdm>=4.62.3
+webdriver_manager>=3.5.2
