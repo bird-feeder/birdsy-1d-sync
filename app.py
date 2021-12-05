@@ -39,13 +39,8 @@ def chrome_driver(driver_path='/usr/bin/chromedriver', headless=True):
     options.add_argument("--start-maximized")
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-application-cache')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-extensions')
-    options.add_argument('disable-infobars')
     if headless:
         options.add_argument('headless')
-    driver_path = '/usr/bin/chromedriver'
     service = Service(driver_path)
     driver = webdriver.Chrome(service=service, options=options)
     return driver
@@ -100,13 +95,17 @@ if __name__ == '__main__':
         lines = f.readlines()
 
     links = list(set([line.rstrip() for line in lines]))
-    links = validate(links)
+    # links = validate(links)
 
     driver = chrome_driver(headless=True)
     driver = login(os.environ['EMAIL'], os.environ['PASSWD'])
     for link in tqdm(links):
-        url, out_filename = download(link)
-        upload(out_filename)
+        try:
+            url, out_filename = download(link)
+            upload(out_filename)
+        except Exception as e:
+            logger.error(f'{link}, {e}')
+            continue
     driver.quit()
 
     with open('videos_links.txt', 'w') as f:

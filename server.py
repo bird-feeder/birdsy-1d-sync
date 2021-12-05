@@ -12,10 +12,10 @@ app = Flask(__name__)
 def _root():
     return 'Birdfeeder Webhooks'
 
-@app.route('/github_push', methods=['POST', 'GET'])
+@app.route('/github_push', methods=['GET', 'POST'])
 def github_push():
     data = request.json
-    subprocess.Popen(['/root/.pyenv/versions/py3.10/bin/python', 'app.py'])
+    subprocess.Popen(['python3', 'app.py'])
     return data
 
 if __name__ == '__main__':
