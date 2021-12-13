@@ -1,21 +1,39 @@
+import json
 import os
 import re
 import shutil
+import signal
+import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
+import cronitor
 import requests
 import wget
 from dotenv import load_dotenv
 from loguru import logger
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
+
+
+def keyboard_interrupt_handler(sig, frame):
+    logger.info(f'KeyboardInterrupt (ID: {sig}) has been caught...')
+    time.sleep(2)
+    try:
+        driver.quit()
+        logger.info('Terminated chrome driver gracefully...')
+    except NameError:
+        pass
+    logger.info('Terminating the program...')
+    sys.exit(0)
 
 
 def validate(lines):
@@ -32,6 +50,25 @@ def validate(lines):
                 lines.remove(line)
                 logger.info(f'Removed line {n}')
     return lines
+
+
+def deduplicate(lines):
+    ids = sorted([(line.rstrip(), line.split('/')[-1].rstrip())
+                  for line in lines])
+    remote_res = os.popen('/usr/bin/rclone lsjson birdsy:').read()
+    time.sleep(5)
+    remote_files = json.loads(remote_res)
+    remote_files_ids = sorted(
+        [Path(''.join(x['Name'].split('_')[3:])).stem for x in remote_files])
+    not_in_remote_ids = list(
+        set([x[1] for x in ids]).difference(remote_files_ids))
+    not_in_remote_links = sorted(
+        [x[0] for x in ids if x[1] in not_in_remote_ids])
+    logger.info(
+        f'{len(ids) - len(not_in_remote_links)}/{len(ids)} files already exist in remote.'
+    )
+    logger.info(f'Number of files to process: {len(not_in_remote_links)}')
+    return not_in_remote_links
 
 
 def chrome_driver(driver_path='/usr/bin/chromedriver', headless=True):
@@ -78,35 +115,65 @@ def download(page_link):
     return url, out_filename
 
 
-def upload(out_filename, rclone_path='/usr/bin/rclone'):
+def upload(out_filename, rclone_path='/usr/bin/rclone', dry_run=False):
+    if dry_run:
+        dry_run_arg = '--dry-run'
+    else:
+        dry_run_arg = ''
     res = os.popen(
-        f'{rclone_path} move {out_filename} birdsy: -P'
-    ).read()
+        f'{rclone_path} move {out_filename} birdsy: -P {dry_run_arg}').read()
     logger.debug(res)
     return res
 
 
 if __name__ == '__main__':
     load_dotenv()
-    logger.remove()
-    logger.add(sys.stderr, level='ERROR')
     logger.add('logs.log')
+    cronitor.api_key = os.environ['CRONITOR_API_KEY']
+    monitor = cronitor.Monitor('Birdsy-webhook')
+    monitor.ping(state='run', message='Webhook triggered')
+
+    dry_run = False
+    if '--dry-run' in sys.argv:
+        dry_run = True
     with open('videos_links.txt') as f:
         lines = f.readlines()
 
-    links = list(set([line.rstrip() for line in lines]))
-    # links = validate(links)
+    signal.signal(signal.SIGINT, keyboard_interrupt_handler)
 
+    links = list(set([line.rstrip() for line in lines]))
+
+    if not dry_run:
+        logger.debug('Validating...')
+        links = validate(links)
+
+    logger.debug('Deduplicating...')
+    links = deduplicate(links)
+    if len(links) == 0:
+        logger.info('Nothing to process. Exiting...')
+        raise SystemExit(0)
+    logger.debug('Running the main process...')
     driver = chrome_driver(headless=True)
     driver = login(os.environ['EMAIL'], os.environ['PASSWD'])
+
+    n = 1
     for link in tqdm(links):
+        logger.info(f'{n}/{len(links)} Processing {link}')
+        n += 1
         try:
             url, out_filename = download(link)
-            upload(out_filename)
-        except Exception as e:
-            logger.error(f'{link}, {e}')
+            upload(out_filename, dry_run=dry_run)
+        except TimeoutException:
+            logger.warning(
+                f'{link} does not appear to contain a video... Skipping...')
+        except KeyboardInterrupt:
+            break
+        except Exception:
+            exc_type, value, _ = sys.exc_info()
+            logger.error(exc_type.__name__)
+            logger.error(f'Failed to download {link}')
+            logger.error(value)
             continue
     driver.quit()
-
-    with open('videos_links.txt', 'w') as f:
-        f.writelines(['# ' + line for line in lines])
+    monitor.ping(state='complete')
+    logger.info('Complete.')

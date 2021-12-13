@@ -1,0 +1,12 @@
+Description=Fetch videos from Birdsy and upload them to Google Drive
+Requires=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/birdsy-1d-sync
+ExecStart=/home/pi/.pyenv/versions/py3.10/bin/python server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
