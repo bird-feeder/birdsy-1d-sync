@@ -1,10 +1,7 @@
 import os
-import sys
-import shlex
 import subprocess
 import time
 
-import cronitor
 from dotenv import load_dotenv
 from flask import Flask, request, json
 from loguru import logger
@@ -21,6 +18,7 @@ def _root():
 def github_push():
     data = request.json
     if data['pusher']['name'] == 'Alyetama':
+        logger.info('Ignoring an event by Alyetama...')
         return data
     pull_out = os.popen('/usr/bin/git pull').read()
     logger.info(pull_out)
