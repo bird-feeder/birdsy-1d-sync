@@ -6,8 +6,9 @@ import sys
 import time
 from pathlib import Path
 
-import cronitor
 import requests
+import psutil
+import streamlit as st
 import wget
 from dotenv import load_dotenv
 from loguru import logger
@@ -21,39 +22,51 @@ from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
 
 
-def keyboard_interrupt_handler(sig, frame):
-    logger.info(f'KeyboardInterrupt (ID: {sig}) has been caught...')
-    time.sleep(2)
-    try:
-        driver.quit()
-        logger.info('Terminated chrome driver gracefully...')
-    except NameError:
-        pass
-    logger.info('Terminating the program...')
-    sys.exit(0)
-
-
 def validate(lines):
+    val_write_ph_0 = st.empty()
+    val_write_ph_0.write('Validation progress:')
     pattern = re.compile(r'https:\/\/birdsy\.com\/channel\/.+\/video\/.+')
-
+    val_ph = st.empty()
+    val_prog_ph = st.empty()
+    val_write_ph = st.empty()
+    val_bar = val_prog_ph.progress(0)
     for n, line in enumerate(tqdm(lines)):
-        if not pattern.match(line):
-            lines.remove(line)
-            logger.info(f'Removed line {n}')
-        else:
-            try:
-                response = requests.get(line)
-            except requests.ConnectionError as exception:
+        curr_progress = int(100 * float(n + 1) / float(len(lines)))
+
+        val_write_ph.write(f'{n + 1}/{len(lines)}')
+        if curr_progress > 100:
+            curr_progress = 100
+        val_bar.progress(curr_progress)
+        try:
+            if not pattern.match(line):
                 lines.remove(line)
                 logger.info(f'Removed line {n}')
+            else:
+                try:
+                    response = requests.get(line)
+                except requests.ConnectionError as exception:
+                    lines.remove(line)
+                    logger.info(f'Removed line {n}')
+                except KeyboardInterrupt:
+                    break
+        except KeyboardInterrupt:
+            break
+        if curr_progress == len(lines):
+            val_bar.progress(100)
+    val_write_ph_0.write('Completed!')
+    time.sleep(2)
+    val_prog_ph.empty()
+    val_ph.empty()
+    val_write_ph.empty()
+    val_write_ph_0.empty()
     return lines
 
 
 def deduplicate(lines):
+    logger.add('logs.log')
     ids = sorted([(line.rstrip(), line.split('/')[-1].rstrip())
                   for line in lines])
-    remote_res = os.popen('/usr/bin/rclone lsjson birdsy:').read()
-    time.sleep(5)
+    remote_res = os.popen('/usr/bin/rclone lsjson birdsy: --config="/home/ubuntu/.config/rclone/rclone.conf"').read()
     remote_files = json.loads(remote_res)
     remote_files_ids = sorted(
         [Path(''.join(x['Name'].split('_')[3:])).stem for x in remote_files])
@@ -80,7 +93,7 @@ def chrome_driver(driver_path='/usr/bin/chromedriver', headless=True):
     return driver
 
 
-def login(email, passwd):
+def login(driver, email, passwd):
     driver.get('https://birdsy.com/login')
     print('Logged in')
     driver.find_element(
@@ -98,7 +111,7 @@ def login(email, passwd):
     return driver
 
 
-def download(page_link):
+def download(driver, page_link):
     driver.get(page_link)
     url = WebDriverWait(driver, 5).until(
         ec.presence_of_element_located(
@@ -123,45 +136,65 @@ def upload(out_filename, rclone_path='/usr/bin/rclone', dry_run=False):
     return res
 
 
-if __name__ == '__main__':
-    load_dotenv()
-    logger.add('logs.log')
-    cronitor.api_key = os.environ['CRONITOR_API_KEY']
-    monitor = cronitor.Monitor('Birdsy-webhook')
-    monitor.ping(state='run', message='Webhook triggered')
+def check_status():
+    for p in psutil.process_iter():
+        try:
+            if 'streamlit' in p.name():
+                args = sum([y for y in [x.split('/') for x in p.cmdline()]],
+                           [])
+                if 'streamlit' in args:
+                    current_process_pid = p.pid
+        except (psutil.ZombieProcess, psutil.AccessDenied):
+            continue
+    return current_process_pid
+
+
+def main(driver, links):
+    logging_in_logs = st.empty()
+    downloads_dir = f'{Path(__file__).parent}/birdsy-uploads'
+    if not Path(downloads_dir).exists():
+        Path(downloads_dir).mkdir(exist_ok=True)
+        logger.info('Created downloads folder')
 
     dry_run = False
     if '--dry-run' in sys.argv:
         dry_run = True
-    with open('videos_links.txt') as f:
-        lines = f.readlines()
-
-    signal.signal(signal.SIGINT, keyboard_interrupt_handler)
-
-    links = list(set([line.rstrip() for line in lines]))
-
-    if not dry_run:
-        logger.debug('Validating...')
-        links = validate(links)
 
     logger.debug('Deduplicating...')
-    links = deduplicate(links)
+    
     if len(links) == 0:
         logger.info('Nothing to process. Exiting...')
-        raise SystemExit(0)
+        sysexit = st.empty()
+        raise SystemExit('Nothing to process... Everything is up-to-date.')
     logger.debug('Running the main process...')
-    driver = chrome_driver(headless=True)
-    driver = login(os.environ['EMAIL'], os.environ['PASSWD'])
+    load_dotenv()
+    logging_in_logs.write('Logging in to Birdsy...')
+    driver = login(driver, os.environ['EMAIL'], os.environ['PASSWD'])
+    logging_in_logs.write('Logged in!')
 
-    n = 1
+    
+    st.markdown('---')
+    main_bar = st.progress(0)
+    ph_2 = st.empty()
+    st.markdown('---')
+
+    empty_cont = st.empty()
+    n = 0
     for link in tqdm(links):
-        logger.info(f'{n}/{len(links)} Processing {link}')
+        progress = st.empty()
+        with progress:
+            progress.info(f'Currently processing {n + 1}/{len(links)} ({link})')
         n += 1
+        logger.debug(f'{n}/{len(links)} Processing {link}')
+        curr_progress = int(100 * float(n) / float(len(links)))
+        if curr_progress > 100:
+            curr_progress = 100
+        main_bar.progress(curr_progress)
         try:
-            url, out_filename = download(link)
+            url, out_filename = download(driver, link)
             upload(out_filename, dry_run=dry_run)
         except TimeoutException:
-            logger.warning(
+            logger.debug(
                 f'{link} does not appear to contain a video... Skipping...')
         except KeyboardInterrupt:
             break
@@ -170,7 +203,12 @@ if __name__ == '__main__':
             logger.error(exc_type.__name__)
             logger.error(f'Failed to download {link}')
             logger.error(value)
-            continue
+        progress.empty()
+    st.balloons()
+    st.write('Completed!')
+
+    logger.info('Completed!')
     driver.quit()
-    monitor.ping(state='complete')
-    logger.info('Complete.')
+    logging_in_logs.write('Logged out...')
+    time.sleep(2)
+    logging_in_logs.empty()

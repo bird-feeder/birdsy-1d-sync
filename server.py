@@ -23,7 +23,7 @@ def github_push():
     pull_out = os.popen('/usr/bin/git pull').read()
     logger.info(pull_out)
     time.sleep(1)
-    subprocess.Popen(['/home/pi/.pyenv/versions/py3.10/bin/python', 'app.py'],
+    subprocess.Popen(['/home/ubuntu/.pyenv/versions/py3.10/bin/python', 'app.py'],
                      shell=False)
     return data
 

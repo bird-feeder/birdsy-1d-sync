@@ -6,4 +6,3 @@ selenium>=4.1.0
 tqdm>=4.62.3
 webdriver_manager>=3.5.2
 flask>=2.0.2
-cronitor>=4.3.0
