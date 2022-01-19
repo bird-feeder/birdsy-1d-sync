@@ -3,9 +3,9 @@ Requires=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/apps/birdsy-1d-sync
-ExecStart=/home/ubuntu/.pyenv/versions/py3.10/bin/python streamlit_app.py
+User=<user>
+WorkingDirectory=<birdsy-1d-sync_dir_location>
+ExecStart=<streamlit_bin_location> run streamlit_app.py --server.headless=true --server.port=<streamlit_app_port> --browser.gatherUsageStats=false
 Restart=always
 
 [Install]

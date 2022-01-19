@@ -30,6 +30,7 @@ def validate(lines):
     val_prog_ph = st.empty()
     val_write_ph = st.empty()
     val_bar = val_prog_ph.progress(0)
+    val_comp = st.empty()
     for n, line in enumerate(tqdm(lines)):
         curr_progress = int(100 * float(n + 1) / float(len(lines)))
 
@@ -53,12 +54,14 @@ def validate(lines):
             break
         if curr_progress == len(lines):
             val_bar.progress(100)
-    val_write_ph_0.write('Completed!')
     time.sleep(2)
     val_prog_ph.empty()
     val_ph.empty()
     val_write_ph.empty()
     val_write_ph_0.empty()
+    val_comp.info('Validation is complete! Moving to processing...')
+    time.sleep(1)
+    val_comp.empty()
     return lines
 
 
@@ -66,7 +69,7 @@ def deduplicate(lines):
     logger.add('logs.log')
     ids = sorted([(line.rstrip(), line.split('/')[-1].rstrip())
                   for line in lines])
-    remote_res = os.popen('/usr/bin/rclone lsjson birdsy: --config="/home/ubuntu/.config/rclone/rclone.conf"').read()
+    remote_res = os.popen(f'''/usr/bin/rclone lsjson birdsy: --config="{os.environ['RCLONE_CONFIG_FILE']}"''').read()
     remote_files = json.loads(remote_res)
     remote_files_ids = sorted(
         [Path(''.join(x['Name'].split('_')[3:])).stem for x in remote_files])
@@ -95,7 +98,6 @@ def chrome_driver(driver_path='/usr/bin/chromedriver', headless=True):
 
 def login(driver, email, passwd):
     driver.get('https://birdsy.com/login')
-    print('Logged in')
     driver.find_element(
         By.XPATH,
         '//*[@id="root"]/div[2]/div/div/div/div/div/form/div[1]/input'
@@ -143,10 +145,11 @@ def check_status():
                 args = sum([y for y in [x.split('/') for x in p.cmdline()]],
                            [])
                 if 'streamlit' in args:
-                    current_process_pid = p.pid
+                    current_proc_pid = p.pid
+                    return current_proc_pid
         except (psutil.ZombieProcess, psutil.AccessDenied):
             continue
-    return current_process_pid
+    
 
 
 def main(driver, links):
@@ -165,7 +168,8 @@ def main(driver, links):
     if len(links) == 0:
         logger.info('Nothing to process. Exiting...')
         sysexit = st.empty()
-        raise SystemExit('Nothing to process... Everything is up-to-date.')
+        st.info('Nothing to process... Everything is up-to-date.')
+        return
     logger.debug('Running the main process...')
     load_dotenv()
     logging_in_logs.write('Logging in to Birdsy...')
