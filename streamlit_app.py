@@ -22,10 +22,10 @@ def login():
                 if submitted:
                     try:
                         assert email in os.environ['EMAILS']
-                        assert passwd == os.environ['PASSWD']
+                        assert passwd == os.environ['LOGIN_PASSWD']
                         logged_in = True
                     except AssertionError:
-                        st.error('The login email or password are incorrect!')
+                        st.error('Incorrect login credentials!')
 
         if logged_in:
             login_form.success('Logged in successfully!')
